@@ -126,8 +126,7 @@ This repo includes a GitHub Actions workflow (`.github/workflows/terraform-secur
 
 | Tool | What It Checks |
 |------|----------------|
-| **Checkov** | IaC misconfigurations, security best practices |
-| **Trivy** | Vulnerabilities, secrets, misconfigurations |
+| **Trivy** | Write-only argument detection (v0.63.0+) |
 | **Custom Script** | Legacy `secret_string`/`password` patterns |
 
 ### What Gets Flagged
@@ -137,13 +136,12 @@ The `00-bad-secret-in-state` directory will trigger warnings for using `secret_s
 ### Run Locally
 
 ```bash
-# Checkov
-pip install checkov
-checkov -d . --framework terraform
-
-# Trivy
+# Trivy (with write-only detection)
 brew install trivy  # or apt-get install trivy
-trivy config .
+trivy config . --config trivy.yaml
+
+# Or use the custom script
+./scripts/leak-check.sh 00-bad-secret-in-state
 ```
 
 ---

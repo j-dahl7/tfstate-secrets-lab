@@ -1,0 +1,19 @@
+# Trivy configuration for tfstate-secrets-lab
+# https://aquasecurity.github.io/trivy/latest/docs/references/configuration/config-file/
+
+# Enable raw Terraform scanning for write-only argument detection
+misconfiguration:
+  scanners:
+    - terraform
+  terraform:
+    raw-config-scanners:
+      - terraform
+
+# Severity levels to report
+severity:
+  - MEDIUM
+  - HIGH
+  - CRITICAL
+
+# Output format
+format: table
