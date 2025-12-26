@@ -118,6 +118,36 @@ az keyvault secret show --vault-name "kv-demo-wo-XXXXX" --name "db-password" --q
 
 ---
 
+## CI/CD Integration
+
+This repo includes a GitHub Actions workflow (`.github/workflows/terraform-security.yml`) that runs on every push and PR:
+
+### Security Scanners
+
+| Tool | What It Checks |
+|------|----------------|
+| **Checkov** | IaC misconfigurations, security best practices |
+| **Trivy** | Vulnerabilities, secrets, misconfigurations |
+| **Custom Script** | Legacy `secret_string`/`password` patterns |
+
+### What Gets Flagged
+
+The `00-bad-secret-in-state` directory will trigger warnings for using `secret_string` instead of `secret_string_wo`. This is intentional - it demonstrates how CI can catch legacy patterns before they reach production.
+
+### Run Locally
+
+```bash
+# Checkov
+pip install checkov
+checkov -d . --framework terraform
+
+# Trivy
+brew install trivy  # or apt-get install trivy
+trivy config .
+```
+
+---
+
 ## Cleanup
 
 ```bash
