@@ -1,0 +1,23 @@
+# Checkov configuration for tfstate-secrets-lab
+# https://www.checkov.io/2.Basics/CLI%20Command%20Reference.html
+
+# Frameworks to scan
+framework:
+  - terraform
+
+# Directories to scan
+directory:
+  - .
+
+# Skip checks that don't apply to this demo lab
+# (This lab intentionally shows bad patterns for educational purposes)
+skip-check:
+  - CKV_AWS_149  # Secrets Manager secret encryption
+  - CKV2_AWS_57  # Secrets Manager automatic rotation
+  - CKV_AZURE_41 # Key Vault logging
+
+# Soft fail - report findings but don't block
+soft-fail: true
+
+# Output format
+output: cli
