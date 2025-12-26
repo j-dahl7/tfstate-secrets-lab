@@ -1,6 +1,6 @@
 # Terraform State Secrets Lab
 
-> **Companion repo for the blog post: [Keep Your Secrets Out of Terraform State](https://nineliveszerotrust.com)**
+> **Companion repo for the blog post: [Terraform 1.11's Game-Changer: Keep Secrets Out of State for Good](https://nineliveszerotrust.com/blog/terraform-secrets-write-only/)**
 
 This hands-on lab demonstrates how Terraform 1.11's **write-only arguments** prevent secrets from leaking into state files.
 
@@ -168,7 +168,7 @@ cd ../03-azure-write-only && terraform destroy -auto-approve
 
 ## Resources
 
-- [Blog Post: Keep Your Secrets Out of Terraform State](https://nineliveszerotrust.com)
+- [Blog Post: Terraform 1.11's Game-Changer: Keep Secrets Out of State for Good](https://nineliveszerotrust.com/blog/terraform-secrets-write-only/)
 - [Terraform: Write-Only Arguments](https://developer.hashicorp.com/terraform/language/manage-sensitive-data/write-only)
 - [Terraform: Ephemeral Resources](https://developer.hashicorp.com/terraform/language/resources/ephemeral)
 - [AWS Provider: secret_string_wo](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/secretsmanager_secret_version)
