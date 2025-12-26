@@ -1,0 +1,149 @@
+name: Terraform Security Scan
+
+on:
+  pull_request:
+    paths:
+      - '**/*.tf'
+      - '**/*.tfvars'
+  push:
+    branches:
+      - main
+    paths:
+      - '**/*.tf'
+      - '**/*.tfvars'
+
+env:
+  TF_VERSION: "1.11.0"
+
+jobs:
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      #-----------------------------------------
+      # Static Analysis - Trivy
+      #-----------------------------------------
+      - name: Run Trivy IaC Scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'config'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'MEDIUM,HIGH,CRITICAL'
+          exit-code: '0'  # Don't fail yet, upload results first
+
+      - name: Upload Trivy SARIF Results
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+      #-----------------------------------------
+      # Custom Checks - Legacy Secret Patterns
+      #-----------------------------------------
+      - name: Check for Legacy Secret Patterns
+        id: legacy-check
+        run: |
+          echo "## Secret Pattern Check" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          ISSUES_FOUND=0
+
+          # Check for secret_string without _wo suffix
+          echo "### Checking for secret_string (non-write-only)..."
+          if grep -rn "secret_string\s*=" --include="*.tf" | grep -v "secret_string_wo" | grep -v "#.*secret_string"; then
+            echo "::warning::Found 'secret_string' usage without '_wo' suffix. Consider migrating to secret_string_wo."
+            echo "- :warning: Found \`secret_string\` usage (should use \`secret_string_wo\`)" >> $GITHUB_STEP_SUMMARY
+            ISSUES_FOUND=1
+          else
+            echo "- :white_check_mark: No legacy \`secret_string\` patterns found" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # Check for password arguments without _wo suffix
+          echo "### Checking for password (non-write-only)..."
+          if grep -rn "^\s*password\s*=" --include="*.tf" | grep -v "password_wo" | grep -v "#.*password"; then
+            echo "::warning::Found 'password' argument usage. Consider migrating to password_wo where supported."
+            echo "- :warning: Found \`password\` usage (should use \`password_wo\`)" >> $GITHUB_STEP_SUMMARY
+            ISSUES_FOUND=1
+          else
+            echo "- :white_check_mark: No legacy \`password\` patterns found" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # Check for hardcoded secrets (common patterns)
+          echo "### Checking for potential hardcoded secrets..."
+          if grep -rEn "(api_key|apikey|secret)\s*=\s*\"[^\"]+\"" --include="*.tf" | grep -v "var\." | grep -v "local\."; then
+            echo "::error::Potential hardcoded secret detected!"
+            echo "- :x: Potential hardcoded secrets detected" >> $GITHUB_STEP_SUMMARY
+            ISSUES_FOUND=1
+          else
+            echo "- :white_check_mark: No hardcoded secrets detected" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ $ISSUES_FOUND -eq 1 ]; then
+            echo "### Recommendations" >> $GITHUB_STEP_SUMMARY
+            echo "- Use \`secret_string_wo\` instead of \`secret_string\` (Terraform 1.11+)" >> $GITHUB_STEP_SUMMARY
+            echo "- Use \`password_wo\` instead of \`password\` where supported" >> $GITHUB_STEP_SUMMARY
+            echo "- Use ephemeral resources for secret generation" >> $GITHUB_STEP_SUMMARY
+            echo "- Reference secrets by ARN/path, not by value" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "issues_found=$ISSUES_FOUND" >> $GITHUB_OUTPUT
+
+      #-----------------------------------------
+      # Terraform Validation (per directory)
+      #-----------------------------------------
+      - name: Validate 00-bad-secret-in-state
+        working-directory: ./00-bad-secret-in-state
+        run: |
+          terraform init -backend=false
+          terraform validate
+
+      - name: Validate 01-good-write-only
+        working-directory: ./01-good-write-only
+        run: |
+          terraform init -backend=false
+          terraform validate
+
+      #-----------------------------------------
+      # Summary
+      #-----------------------------------------
+      - name: Post Summary Comment
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issuesFound = '${{ steps.legacy-check.outputs.issues_found }}' === '1';
+
+            let body = '## Terraform Security Scan Results\n\n';
+
+            if (issuesFound) {
+              body += ':warning: **Legacy secret patterns detected**\n\n';
+              body += 'Consider migrating to write-only arguments (`_wo` suffix) ';
+              body += 'to prevent secrets from being stored in state files.\n\n';
+              body += 'See the Actions tab for details.\n';
+            } else {
+              body += ':white_check_mark: **No legacy secret patterns detected**\n\n';
+              body += 'Trivy scan results are available in the Security tab.\n';
+            }
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body
+            });

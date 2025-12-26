@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    body {
+      margin: 0;
+      padding: 20px;
+      background: #1e1e1e;
+      font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+    }
+    .terminal {
+      background: #0d1117;
+      border-radius: 8px;
+      padding: 20px;
+      max-width: 800px;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+    }
+    .terminal-header {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 15px;
+    }
+    .dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+    }
+    .red { background: #ff5f56; }
+    .yellow { background: #ffbd2e; }
+    .green { background: #27c93f; }
+    .prompt {
+      color: #7ee787;
+      margin-bottom: 5px;
+    }
+    .command {
+      color: #79c0ff;
+      margin-bottom: 15px;
+    }
+    .output {
+      color: #c9d1d9;
+      white-space: pre;
+      line-height: 1.5;
+    }
+    .highlight-green {
+      color: #7ee787;
+      font-weight: bold;
+    }
+    .highlight-null {
+      color: #ff7b72;
+      font-style: italic;
+    }
+    .key {
+      color: #a5d6ff;
+    }
+  </style>
+</head>
+<body>
+  <div class="terminal">
+    <div class="terminal-header">
+      <div class="dot red"></div>
+      <div class="dot yellow"></div>
+      <div class="dot green"></div>
+    </div>
+    <div class="prompt">~/tfstate-secrets-lab/01-good-write-only $</div>
+    <div class="command">terraform state pull | jq '.resources[] | select(.type == "aws_secretsmanager_secret_version") | .instances[].attributes | {secret_string, secret_string_wo, has_secret_string_wo}'</div>
+    <div class="output">{
+  <span class="key">"secret_string"</span>: <span class="highlight-green">""</span>,
+  <span class="key">"secret_string_wo"</span>: <span class="highlight-null">null</span>,
+  <span class="key">"has_secret_string_wo"</span>: <span class="highlight-green">true</span>
+}</div>
+  </div>
+</body>
+</html>

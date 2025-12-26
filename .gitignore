@@ -1,0 +1,40 @@
+# Terraform
+*.tfstate
+*.tfstate.*
+*.tfstate.backup
+.terraform/
+.terraform.lock.hcl
+*.tfvars
+*.tfvars.json
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Local .terraform directories
+**/.terraform/*
+
+# Sensitive files
+*.pem
+*.key
+*credentials*.json
+*credentials*.txt
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Screenshots (keep HTML templates, not generated PNGs)
+screenshots/*.png
+
+# Temp files
+*.tmp
+*.log
