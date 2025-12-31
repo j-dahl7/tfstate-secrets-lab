@@ -1,6 +1,7 @@
 name: Terraform Security Scan
 
 on:
+  workflow_dispatch:  # Allow manual triggering
   pull_request:
     paths:
       - '**/*.tf'
