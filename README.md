@@ -1,5 +1,7 @@
 # Terraform State Secrets Lab
 
+![Terraform State Secrets](https://nineliveszerotrust.com/images/blog/terraform-secrets/og-terraform-secrets.png)
+
 > **Companion repo for the blog post: [Terraform 1.11's Game-Changer: Keep Secrets Out of State for Good](https://nineliveszerotrust.com/blog/terraform-secrets-write-only/)**
 
 This hands-on lab demonstrates how Terraform 1.11's **write-only arguments** prevent secrets from leaking into state files.
