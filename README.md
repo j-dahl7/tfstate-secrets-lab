@@ -6,6 +6,13 @@
 
 This hands-on lab demonstrates how Terraform 1.11's **write-only arguments** prevent secrets from leaking into state files.
 
+## Verification status
+
+- **Last reviewed:** 2026-07-10
+- **Scope:** Terraform formatting/initialization/validation for all four examples, workflow/YAML review, Bash syntax and redaction tests, secret scanning, and documentation/link comparison.
+- **Status:** Locally verified with current AWS, AzureRM, and Random providers while retaining Terraform 1.11 as the documented minimum.
+- **Limitation:** No live AWS/Azure resources were created, so provider credentials, cloud policies, costs, and destroy behavior still require a disposable-account test.
+
 ## The Problem
 
 Traditional Terraform stores secret values in plain text within state files:
@@ -44,8 +51,11 @@ resource "aws_secretsmanager_secret_version" "db_creds" {
 ## Prerequisites
 
 - **Terraform v1.11.0+** (required for write-only arguments)
+- **AWS provider v5.88.0+** and **AzureRM provider v4.25.0+** for the write-only examples
 - **jq** (for state inspection)
 - **AWS CLI** or **Azure CLI** configured with valid credentials
+
+Use a disposable lab account/subscription. The traditional examples intentionally place generated passwords in local Terraform state, and the resources can incur small usage charges until destroyed.
 
 ---
 
@@ -77,8 +87,8 @@ terraform state pull | jq '.resources[] | select(.type == "random_password") | .
 # Modern - no password in state
 cd ../01-good-write-only
 terraform init && terraform apply -auto-approve
-terraform state pull | jq '.resources[] | select(.type == "aws_secretsmanager_secret_version") | .instances[].attributes | {secret_string, secret_string_wo, has_secret_string_wo}'
-# Output: {"secret_string": "", "secret_string_wo": null, "has_secret_string_wo": true}
+terraform state pull | jq '.resources[] | select(.type == "aws_secretsmanager_secret_version") | .instances[].attributes | {secret_string, secret_string_wo, secret_string_wo_version}'
+# The secret value fields are null/absent; only secret_string_wo_version is persisted.
 ```
 
 ### Azure Demo
@@ -99,14 +109,14 @@ terraform state pull | jq '.resources[] | select(.type == "azurerm_key_vault_sec
 
 ## Verify Secrets Exist
 
-The secrets are stored in the cloud - just not in Terraform state:
+The secrets are stored in the cloud—not in Terraform state. Verify resource metadata by default so the secret value is not printed into a terminal, CI log, or shell recording:
 
 ```bash
 # AWS
-aws secretsmanager get-secret-value --secret-id "demo-db-password-good-XXXXX" --query 'SecretString' --output text
+aws secretsmanager describe-secret --secret-id "demo-db-password-good-XXXXX" --query '{Name:Name,ARN:ARN}'
 
 # Azure
-az keyvault secret show --vault-name "kv-demo-wo-XXXXX" --name "db-password" --query value -o tsv
+az keyvault secret show --vault-name "kv-demo-wo-XXXXX" --name "db-password" --query '{id:id,enabled:attributes.enabled}'
 ```
 
 ---
@@ -117,6 +127,8 @@ az keyvault secret show --vault-name "kv-demo-wo-XXXXX" --name "db-password" --q
 ./scripts/leak-check.sh 00-bad-secret-in-state  # Detects leak
 ./scripts/leak-check.sh 01-good-write-only      # Clean
 ```
+
+The scanner reports resource and attribute names only; detected values are always redacted. A missing, empty, or unreadable state returns exit code `2` because an unapplied directory cannot be distinguished safely from a backend or authentication failure.
 
 ---
 
@@ -134,6 +146,8 @@ This repo includes a GitHub Actions workflow (`.github/workflows/terraform-secur
 ### What Gets Flagged
 
 The `00-bad-secret-in-state` directory will trigger warnings for using `secret_string` instead of `secret_string_wo`. This is intentional - it demonstrates how CI can catch legacy patterns before they reach production.
+
+The custom blocking checks are scoped to the two secure examples, so the intentionally vulnerable directories do not make every pull request fail. CI validates all four Terraform directories, posts advisory Trivy output to the workflow log, and fails if a secure example regresses to a legacy or hardcoded secret pattern.
 
 ### Run Locally
 
@@ -156,6 +170,8 @@ cd ../01-good-write-only && terraform destroy -auto-approve
 cd ../02-azure-traditional && terraform destroy -auto-approve
 cd ../03-azure-write-only && terraform destroy -auto-approve
 ```
+
+After destruction, local state can still contain the intentionally leaked demo passwords. Treat every state file as sensitive and securely remove the lab directories or state files according to your organization's data-handling process.
 
 ---
 
@@ -180,4 +196,4 @@ cd ../03-azure-write-only && terraform destroy -auto-approve
 
 ## License
 
-MIT - Use freely for demos and education.
+[MIT](LICENSE) - Use freely for demos and education.

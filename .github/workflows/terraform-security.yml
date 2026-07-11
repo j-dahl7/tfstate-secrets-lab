@@ -6,12 +6,18 @@ on:
     paths:
       - '**/*.tf'
       - '**/*.tfvars'
+      - '.github/workflows/terraform-security.yml'
+      - 'scripts/**'
+      - 'trivy.yaml'
   push:
     branches:
       - main
     paths:
       - '**/*.tf'
       - '**/*.tfvars'
+      - '.github/workflows/terraform-security.yml'
+      - 'scripts/**'
+      - 'trivy.yaml'
 
 env:
   TF_VERSION: "1.11.0"
@@ -22,15 +28,14 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      security-events: write
       pull-requests: write
 
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
         with:
           terraform_version: ${{ env.TF_VERSION }}
 
@@ -39,7 +44,7 @@ jobs:
       # (v0.63.0+ with --raw-config-scanners=terraform)
       #-----------------------------------------
       - name: Run Trivy IaC Scanner
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: 'config'
           scan-ref: '.'
@@ -59,7 +64,7 @@ jobs:
 
           # Check for secret_string without _wo suffix
           echo "### Checking for secret_string (non-write-only)..."
-          if grep -rn "secret_string\s*=" --include="*.tf" | grep -v "secret_string_wo" | grep -v "#.*secret_string"; then
+          if grep -rn "secret_string\s*=" 01-good-write-only 03-azure-write-only --include="*.tf" | grep -v "secret_string_wo" | grep -v "#.*secret_string"; then
             echo "::warning::Found 'secret_string' usage without '_wo' suffix. Consider migrating to secret_string_wo."
             echo "- :warning: Found \`secret_string\` usage (should use \`secret_string_wo\`)" >> $GITHUB_STEP_SUMMARY
             ISSUES_FOUND=1
@@ -69,7 +74,7 @@ jobs:
 
           # Check for password arguments without _wo suffix
           echo "### Checking for password (non-write-only)..."
-          if grep -rn "^\s*password\s*=" --include="*.tf" | grep -v "password_wo" | grep -v "#.*password"; then
+          if grep -rn "^\s*password\s*=" 01-good-write-only 03-azure-write-only --include="*.tf" | grep -v "password_wo" | grep -v "#.*password"; then
             echo "::warning::Found 'password' argument usage. Consider migrating to password_wo where supported."
             echo "- :warning: Found \`password\` usage (should use \`password_wo\`)" >> $GITHUB_STEP_SUMMARY
             ISSUES_FOUND=1
@@ -79,7 +84,7 @@ jobs:
 
           # Check for hardcoded secrets (common patterns)
           echo "### Checking for potential hardcoded secrets..."
-          if grep -rEn "(api_key|apikey|secret)\s*=\s*\"[^\"]+\"" --include="*.tf" | grep -v "var\." | grep -v "local\."; then
+          if grep -rEn "(api_key|apikey|secret)\s*=\s*\"[^\"]+\"" 01-good-write-only 03-azure-write-only --include="*.tf" | grep -v "var\." | grep -v "local\."; then
             echo "::error::Potential hardcoded secret detected!"
             echo "- :x: Potential hardcoded secrets detected" >> $GITHUB_STEP_SUMMARY
             ISSUES_FOUND=1
@@ -113,12 +118,25 @@ jobs:
           terraform init -backend=false
           terraform validate
 
+      - name: Validate 02-azure-traditional
+        working-directory: ./02-azure-traditional
+        run: |
+          terraform init -backend=false
+          terraform validate
+
+      - name: Validate 03-azure-write-only
+        working-directory: ./03-azure-write-only
+        run: |
+          terraform init -backend=false
+          terraform validate
+
       #-----------------------------------------
       # Summary
       #-----------------------------------------
       - name: Post Summary Comment
-        if: github.event_name == 'pull_request'
-        uses: actions/github-script@v7
+        if: always() && github.event_name == 'pull_request'
+        continue-on-error: true
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
             const issuesFound = '${{ steps.legacy-check.outputs.issues_found }}' === '1';
@@ -132,12 +150,18 @@ jobs:
               body += 'See the Actions tab for details.\n';
             } else {
               body += ':white_check_mark: **No legacy secret patterns detected**\n\n';
-              body += 'Trivy scan results are available in the Security tab.\n';
+              body += 'Trivy scan results are available in the workflow log and job summary.\n';
             }
 
-            github.rest.issues.createComment({
+            await github.rest.issues.createComment({
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
               body: body
             });
+
+      - name: Enforce secure-example secret checks
+        if: always() && steps.legacy-check.outputs.issues_found == '1'
+        run: |
+          echo "Legacy or hardcoded secret patterns were found in a secure example." >&2
+          exit 1

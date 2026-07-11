@@ -12,6 +12,10 @@
 
 set -euo pipefail
 
+STATE_FILE="$(mktemp "${TMPDIR:-/tmp}/tf-state-check.XXXXXX.json")"
+chmod 600 "$STATE_FILE"
+trap 'rm -f "$STATE_FILE"' EXIT
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -52,18 +56,16 @@ fi
 
 # Check if state exists
 echo "Checking for Terraform state..."
-if ! $TERRAFORM state pull > /tmp/tf-state-check.json 2>&1; then
-    echo -e "${YELLOW}WARNING: No state found or unable to pull state${NC}"
-    echo "This might be expected if you haven't run 'terraform apply' yet."
-    rm -f /tmp/tf-state-check.json
-    exit 0
+if ! "$TERRAFORM" state pull > "$STATE_FILE" 2>/dev/null; then
+    echo -e "${RED}ERROR: No state found or unable to pull state${NC}"
+    echo "The scan cannot distinguish an unapplied directory from a backend or authentication failure."
+    exit 2
 fi
 
-STATE_SIZE=$(wc -c < /tmp/tf-state-check.json)
+STATE_SIZE=$(wc -c < "$STATE_FILE")
 if [ "$STATE_SIZE" -lt 10 ]; then
-    echo -e "${YELLOW}WARNING: State appears empty${NC}"
-    rm -f /tmp/tf-state-check.json
-    exit 0
+    echo -e "${RED}ERROR: State appears empty${NC}"
+    exit 2
 fi
 
 echo "State file retrieved (${STATE_SIZE} bytes)"
@@ -74,30 +76,33 @@ echo "Scanning for sensitive patterns: ${SECRET_PATTERNS}"
 echo ""
 
 # Also check random_password.result which often contains leaked passwords
-MATCHES=$(cat /tmp/tf-state-check.json | jq -r '
-  .resources[]? |
+MATCHES=$(jq -r '
+  .resources[]? as $resource |
+  $resource |
   select(.type == "random_password" or .type == "random_string") |
   .instances[]? |
   .attributes |
   select(.result != null and .result != "") |
-  "  [random_password] result: \(.result | .[0:40])\(if (.result | length) > 40 then \"...\" else \"\" end)"
-' 2>/dev/null || true)
+  "  \($resource.type).\($resource.name): result (value redacted)"
+' "$STATE_FILE" 2>/dev/null || true)
 
 # Also scan for named patterns
-MATCHES2=$(cat /tmp/tf-state-check.json | jq -r '
-  .resources[]? |
+MATCHES2=$(jq -r '
+  .resources[]? as $resource |
+  $resource |
   .instances[]? |
   .attributes |
   to_entries[] |
   select(.key | test("'"$SECRET_PATTERNS"'"; "i")) |
   select(.value != null and .value != "" and (.value | type) == "string") |
-  "  \(.key): \(.value | .[0:40])\(if (.value | length) > 40 then \"...\" else \"\" end)"
-' 2>/dev/null || true)
+  "  \($resource.type).\($resource.name): \(.key) (value redacted)"
+' "$STATE_FILE" 2>/dev/null || true)
 
-MATCHES="${MATCHES}${MATCHES2}"
-
-# Cleanup
-rm -f /tmp/tf-state-check.json
+if [ -n "$MATCHES" ] && [ -n "$MATCHES2" ]; then
+    MATCHES="${MATCHES}"$'\n'"${MATCHES2}"
+else
+    MATCHES="${MATCHES}${MATCHES2}"
+fi
 
 # Report results
 if [ -n "$MATCHES" ]; then
