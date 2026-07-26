@@ -24,12 +24,27 @@ provider "azurerm" {
 data "azurerm_client_config" "current" {}
 
 variable "operator_ip_cidr" {
-  description = "Exact public IPv4 /32 CIDR allowed to reach the demo Key Vault data plane"
+  description = "Exact globally routable public IPv4 /32 CIDR allowed to reach the demo Key Vault data plane"
   type        = string
 
   validation {
-    condition     = can(cidrnetmask(var.operator_ip_cidr)) && endswith(var.operator_ip_cidr, "/32")
-    error_message = "operator_ip_cidr must be one exact public IPv4 address expressed as a /32 CIDR."
+    condition = try(alltrue([
+      length(regexall("^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}/32$", var.operator_ip_cidr)) == 1,
+      cidrhost(var.operator_ip_cidr, 0) == split("/", var.operator_ip_cidr)[0],
+      tonumber(split(".", split("/", var.operator_ip_cidr)[0])[0]) > 0,
+      tonumber(split(".", split("/", var.operator_ip_cidr)[0])[0]) < 224,
+      !contains([10, 127], tonumber(split(".", split("/", var.operator_ip_cidr)[0])[0])),
+      !(tonumber(split(".", split("/", var.operator_ip_cidr)[0])[0]) == 100 && tonumber(split(".", split("/", var.operator_ip_cidr)[0])[1]) >= 64 && tonumber(split(".", split("/", var.operator_ip_cidr)[0])[1]) <= 127),
+      !(tonumber(split(".", split("/", var.operator_ip_cidr)[0])[0]) == 169 && tonumber(split(".", split("/", var.operator_ip_cidr)[0])[1]) == 254),
+      !(tonumber(split(".", split("/", var.operator_ip_cidr)[0])[0]) == 172 && tonumber(split(".", split("/", var.operator_ip_cidr)[0])[1]) >= 16 && tonumber(split(".", split("/", var.operator_ip_cidr)[0])[1]) <= 31),
+      !(tonumber(split(".", split("/", var.operator_ip_cidr)[0])[0]) == 192 && tonumber(split(".", split("/", var.operator_ip_cidr)[0])[1]) == 168),
+      !(tonumber(split(".", split("/", var.operator_ip_cidr)[0])[0]) == 192 && tonumber(split(".", split("/", var.operator_ip_cidr)[0])[1]) == 0 && contains([0, 2], tonumber(split(".", split("/", var.operator_ip_cidr)[0])[2]))),
+      !(tonumber(split(".", split("/", var.operator_ip_cidr)[0])[0]) == 192 && tonumber(split(".", split("/", var.operator_ip_cidr)[0])[1]) == 88 && tonumber(split(".", split("/", var.operator_ip_cidr)[0])[2]) == 99),
+      !(tonumber(split(".", split("/", var.operator_ip_cidr)[0])[0]) == 198 && contains([18, 19], tonumber(split(".", split("/", var.operator_ip_cidr)[0])[1]))),
+      !(tonumber(split(".", split("/", var.operator_ip_cidr)[0])[0]) == 198 && tonumber(split(".", split("/", var.operator_ip_cidr)[0])[1]) == 51 && tonumber(split(".", split("/", var.operator_ip_cidr)[0])[2]) == 100),
+      !(tonumber(split(".", split("/", var.operator_ip_cidr)[0])[0]) == 203 && tonumber(split(".", split("/", var.operator_ip_cidr)[0])[1]) == 0 && tonumber(split(".", split("/", var.operator_ip_cidr)[0])[2]) == 113),
+    ]), false)
+    error_message = "operator_ip_cidr must be one canonical, globally routable public IPv4 address expressed as a /32 CIDR; private, shared, loopback, link-local, documentation, benchmarking, multicast, and reserved ranges are rejected."
   }
 }
 

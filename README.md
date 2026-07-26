@@ -55,13 +55,16 @@ terraform -chdir=01-good-write-only apply
 ```
 
 **Both** Azure examples keep the Key Vault firewall deny-by-default and require
-the exact public IPv4 address of the trusted operator. Supply one `/32` only;
-broad network ranges are rejected by the configuration. The network posture is
-deliberately identical across the two, so the only variable the comparison
-isolates is traditional `value` versus write-only `value_wo`:
+the exact globally routable public IPv4 address of the trusted operator. Supply
+one canonical `/32` only. Private, shared, loopback, link-local, documentation,
+benchmarking, multicast, reserved, IPv6, and broad network ranges are rejected.
+Azure Key Vault IP rules support public IPv4 addresses; use a private endpoint
+or virtual-network design instead of trying to place a private address in this
+IP rule. The network posture is deliberately identical across the two, keeping
+the secret state-handling mechanism as the security behavior under comparison:
 
 ```bash
-export TF_VAR_operator_ip_cidr="203.0.113.10/32" # replace with your exact public IPv4
+export TF_VAR_operator_ip_cidr="YOUR_CURRENT_PUBLIC_IPV4/32" # replace before running
 
 terraform -chdir=03-azure-write-only init -lockfile=readonly
 terraform -chdir=03-azure-write-only plan
