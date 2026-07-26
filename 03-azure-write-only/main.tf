@@ -1,13 +1,13 @@
 terraform {
-  required_version = ">= 1.11.0"
+  required_version = ">= 1.11.0, < 2.0.0"
   required_providers {
     azurerm = {
       source  = "hashicorp/azurerm"
-      version = ">= 4.14.0"
+      version = "= 4.25.0"
     }
     random = {
       source  = "hashicorp/random"
-      version = ">= 3.6.0"
+      version = "= 3.7.2"
     }
   }
 }
@@ -22,6 +22,16 @@ provider "azurerm" {
 
 # Get current client config for Key Vault access policy
 data "azurerm_client_config" "current" {}
+
+variable "operator_ip_cidr" {
+  description = "Exact public IPv4 /32 CIDR allowed to reach the demo Key Vault data plane"
+  type        = string
+
+  validation {
+    condition     = can(cidrnetmask(var.operator_ip_cidr)) && endswith(var.operator_ip_cidr, "/32")
+    error_message = "operator_ip_cidr must be one exact public IPv4 address expressed as a /32 CIDR."
+  }
+}
 
 # Random suffix for unique naming
 resource "random_id" "suffix" {
@@ -50,6 +60,12 @@ resource "azurerm_key_vault" "demo" {
   # For demo purposes - adjust for production
   purge_protection_enabled   = false
   soft_delete_retention_days = 7
+
+  network_acls {
+    bypass         = "AzureServices"
+    default_action = "Deny"
+    ip_rules       = [var.operator_ip_cidr]
+  }
 
   access_policy {
     tenant_id = data.azurerm_client_config.current.tenant_id

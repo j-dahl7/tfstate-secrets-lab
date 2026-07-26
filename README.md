@@ -1,183 +1,153 @@
 # Terraform State Secrets Lab
 
-![Terraform State Secrets](https://nineliveszerotrust.com/images/blog/terraform-secrets/og-terraform-secrets.png)
+This is the companion lab for [Terraform 1.11 Write-Only Arguments: Keep
+Supported Secrets Out of State](https://nineliveszerotrust.com/blog/terraform-secrets-write-only/).
+It contrasts traditional state-persisted secrets with ephemeral resources and
+Terraform 1.11 write-only provider arguments.
 
-> **Companion repo for the blog post: [Terraform 1.11's Game-Changer: Keep Secrets Out of State for Good](https://nineliveszerotrust.com/blog/terraform-secrets-write-only/)**
+> **Safety boundary:** The `00` and `02` examples are intentionally insecure.
+> Run them only in a disposable, access-restricted lab account with synthetic
+> values. Never commit a state file, upload one as a CI artifact, paste one into
+> a ticket, or print its attributes to prove the leak.
 
-This hands-on lab demonstrates how Terraform 1.11's **write-only arguments** prevent secrets from leaking into state files.
+## Layout
 
-## The Problem
+| Directory | Cloud | Behavior |
+|---|---|---|
+| `00-bad-secret-in-state` | AWS | Traditional `random_password` and `secret_string`; value persists in state |
+| `01-good-write-only` | AWS | Ephemeral password and `secret_string_wo`; value is not persisted |
+| `02-azure-traditional` | Azure | Traditional password and Key Vault `value`; value persists in state |
+| `03-azure-write-only` | Azure | Ephemeral password and `value_wo`; value is not persisted |
 
-Traditional Terraform stores secret values in plain text within state files:
-
-```hcl
-# Traditional approach - password ends up in state!
-resource "random_password" "db_password" {
-  length = 24
-}
-
-resource "aws_secretsmanager_secret_version" "db_creds" {
-  secret_id     = aws_secretsmanager_secret.db_creds.id
-  secret_string = random_password.db_password.result  # Stored in state
-}
-```
-
-## The Solution
-
-Terraform 1.11 introduces **ephemeral resources** and **write-only arguments**:
-
-```hcl
-# Modern approach - password never touches state!
-ephemeral "random_password" "db_password" {
-  length = 24
-}
-
-resource "aws_secretsmanager_secret_version" "db_creds" {
-  secret_id                = aws_secretsmanager_secret.db_creds.id
-  secret_string_wo         = ephemeral.random_password.db_password.result  # NOT in state
-  secret_string_wo_version = 1
-}
-```
-
----
+The secure examples are guarded against regression by
+`scripts/check_terraform_security.py`. The state scanner reports field
+locations only and never reports field values.
 
 ## Prerequisites
 
-- **Terraform v1.11.0+** (required for write-only arguments)
-- **jq** (for state inspection)
-- **AWS CLI** or **Azure CLI** configured with valid credentials
+- Terraform 1.11.0 or newer
+- Random provider 3.7.0 or newer for ephemeral `random_password`
+- AWS provider 5.88.0 or newer for `secret_string_wo`
+- AzureRM provider 4.23.0 or newer for `value_wo`
+- Python 3.8 or newer
+- Bash
+- AWS CLI or Azure CLI only if you apply the corresponding cloud example
+- A disposable subscription/account and a protected, encrypted state backend
 
----
+AzureRM 4.x requires an explicit subscription selection for plan/apply. Before
+running either Azure example, set `ARM_SUBSCRIPTION_ID` to the exact disposable
+subscription ID and verify that selection with `az account show`; do not rely
+on whichever account happens to be active.
 
-## Lab Structure
+The checked-in lock files select the reviewed builds used by this revision:
+AWS 5.100.0, AzureRM 4.25.0, and Random 3.7.2. `.terraform-version`
+selects Terraform 1.14.9 for version managers, while the configuration retains
+the documented Terraform 1.11 compatibility floor.
 
-```
-tfstate-secrets-lab/
-├── 00-bad-secret-in-state/   # AWS Traditional (shows the leak)
-├── 01-good-write-only/       # AWS Modern (no leak)
-├── 02-azure-traditional/     # Azure Traditional (shows the leak)
-├── 03-azure-write-only/      # Azure Modern (no leak)
-├── scripts/leak-check.sh     # State scanner tool
-└── .github/workflows/        # CI/CD example
-```
+## Run the examples
 
----
-
-## Quick Start
-
-### AWS Demo
-
-```bash
-# Traditional - see the password leak
-cd 00-bad-secret-in-state
-terraform init && terraform apply -auto-approve
-terraform state pull | jq '.resources[] | select(.type == "random_password") | .instances[].attributes | {result, length}'
-# Output: {"result": "YOUR_PASSWORD_HERE", "length": 24}
-
-# Modern - no password in state
-cd ../01-good-write-only
-terraform init && terraform apply -auto-approve
-terraform state pull | jq '.resources[] | select(.type == "aws_secretsmanager_secret_version") | .instances[].attributes | {secret_string, secret_string_wo, has_secret_string_wo}'
-# Output: {"secret_string": "", "secret_string_wo": null, "has_secret_string_wo": true}
-```
-
-### Azure Demo
+Initialize, review, and apply one example at a time:
 
 ```bash
-# Traditional - see the password leak
-cd 02-azure-traditional
-terraform init && terraform apply -auto-approve
-terraform state pull | jq '.resources[] | select(.type == "random_password") | .instances[].attributes | {result, length}'
-
-# Modern - no password in state
-cd ../03-azure-write-only
-terraform init && terraform apply -auto-approve
-terraform state pull | jq '.resources[] | select(.type == "azurerm_key_vault_secret") | .instances[].attributes | {value, value_wo, value_wo_version}'
+terraform -chdir=01-good-write-only init -lockfile=readonly
+terraform -chdir=01-good-write-only plan
+terraform -chdir=01-good-write-only apply
 ```
 
----
-
-## Verify Secrets Exist
-
-The secrets are stored in the cloud - just not in Terraform state:
+The Azure write-only example keeps the Key Vault firewall deny-by-default and
+requires the exact public IPv4 address of the trusted operator. Supply one
+`/32` only; broad network ranges are rejected by the configuration:
 
 ```bash
-# AWS
-aws secretsmanager get-secret-value --secret-id "demo-db-password-good-XXXXX" --query 'SecretString' --output text
-
-# Azure
-az keyvault secret show --vault-name "kv-demo-wo-XXXXX" --name "db-password" --query value -o tsv
+export TF_VAR_operator_ip_cidr="203.0.113.10/32" # replace with your exact public IPv4
+terraform -chdir=03-azure-write-only init -lockfile=readonly
+terraform -chdir=03-azure-write-only plan
+terraform -chdir=03-azure-write-only apply
 ```
 
----
-
-## Run the Scanner
+For the intentionally traditional example, use the same lifecycle but do not
+print or query state attributes. A metadata-only view is enough to show which
+resource types are persisted:
 
 ```bash
-./scripts/leak-check.sh 00-bad-secret-in-state  # Detects leak
-./scripts/leak-check.sh 01-good-write-only      # Clean
+terraform -chdir=00-bad-secret-in-state state list
 ```
 
----
-
-## CI/CD Integration
-
-This repo includes a GitHub Actions workflow (`.github/workflows/terraform-security.yml`) that runs on every push and PR:
-
-### Security Scanners
-
-| Tool | What It Checks |
-|------|----------------|
-| **Trivy** | Write-only argument detection (v0.63.0+) |
-| **Custom Script** | Legacy `secret_string`/`password` patterns |
-
-### What Gets Flagged
-
-The `00-bad-secret-in-state` directory will trigger warnings for using `secret_string` instead of `secret_string_wo`. This is intentional - it demonstrates how CI can catch legacy patterns before they reach production.
-
-### Run Locally
+The scanner provides the safe comparison:
 
 ```bash
-# Trivy (with write-only detection)
-brew install trivy  # or apt-get install trivy
-trivy config . --config trivy.yaml
-
-# Or use the custom script
-./scripts/leak-check.sh 00-bad-secret-in-state
+bash scripts/leak-check.sh 00-bad-secret-in-state  # exit 1: leak fields found
+bash scripts/leak-check.sh 01-good-write-only      # exit 0: heuristic scan clean
 ```
 
----
+You can also scan an already-protected local export without invoking Terraform:
+
+```bash
+bash scripts/leak-check.sh --state-file /protected/path/terraform.tfstate
+```
+
+The scanner's contract is:
+
+| Exit | Meaning |
+|---:|---|
+| `0` | No likely secret-bearing values detected |
+| `1` | One or more likely secret-bearing fields detected; values remain redacted |
+| `2` | Tool, usage, pull, empty-state, or JSON-parse failure |
+
+Exit `2` is deliberately fail-closed. An unavailable or malformed state is not
+evidence that the state is clean.
+
+## Confirm the cloud object without retrieving the secret
+
+Use metadata-only projections. Do not request `SecretString`, `value`, or an
+equivalent payload.
+
+```bash
+# AWS: returns identifiers and version metadata only
+aws secretsmanager describe-secret \
+  --secret-id demo-db-password-good-EXAMPLE \
+  --query '{Name:Name,ARN:ARN,VersionIdsToStages:VersionIdsToStages}'
+
+# Azure: returns object metadata only
+az keyvault secret list-versions \
+  --vault-name kv-demo-wo-EXAMPLE \
+  --name db-password \
+  --query '[].{id:id,enabled:attributes.enabled,updated:attributes.updated}'
+```
+
+## Local validation
+
+The fixtures contain synthetic sentinel strings solely to prove the scanner
+redacts values. The test suite asserts those strings never reach stdout or
+stderr.
+
+```bash
+python3 -m unittest discover -s tests -v
+python3 scripts/check_terraform_security.py
+bash scripts/leak-check.sh --state-file tests/fixtures/clean-state.json
+terraform fmt -check -recursive
+```
+
+CI runs the same tests, explicitly requires the leaky fixture to exit `1`,
+initializes each directory with `-lockfile=readonly`, validates all four
+Terraform directories, and runs Trivy with `exit-code: 1` against both secure
+examples. Intentional insecure examples remain teaching fixtures and are not
+used as the passing security baseline.
 
 ## Cleanup
 
+Destroy the exact example you applied, confirm the named cloud resources are
+gone, and then remove only that example's local state through your approved
+secure-data process:
+
 ```bash
-cd 00-bad-secret-in-state && terraform destroy -auto-approve
-cd ../01-good-write-only && terraform destroy -auto-approve
-cd ../02-azure-traditional && terraform destroy -auto-approve
-cd ../03-azure-write-only && terraform destroy -auto-approve
+terraform -chdir=01-good-write-only destroy
 ```
 
----
-
-## Key Patterns
-
-| Cloud | Traditional | Modern (Write-Only) |
-|-------|-------------|---------------------|
-| AWS | `secret_string = value` | `secret_string_wo = ephemeral.x.result` |
-| Azure | `value = secret` | `value_wo = ephemeral.x.result` |
-
----
-
-## Resources
-
-- [Blog Post: Terraform 1.11's Game-Changer: Keep Secrets Out of State for Good](https://nineliveszerotrust.com/blog/terraform-secrets-write-only/)
-- [Terraform: Write-Only Arguments](https://developer.hashicorp.com/terraform/language/manage-sensitive-data/write-only)
-- [Terraform: Ephemeral Resources](https://developer.hashicorp.com/terraform/language/resources/ephemeral)
-- [AWS Provider: secret_string_wo](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/secretsmanager_secret_version)
-- [AzureRM Provider: value_wo](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/key_vault_secret)
-
----
+AWS examples set a zero-day recovery window for disposable cleanup; that is
+not a production recommendation. Azure examples disable purge protection for
+the same lab-only reason.
 
 ## License
 
-MIT - Use freely for demos and education.
+MIT. Use the lab for demos and education.
