@@ -41,6 +41,26 @@ scanner = load_module("scan_state", ROOT / "scripts" / "scan_state.py")
 security = load_module("check_terraform_security", ROOT / "scripts" / "check_terraform_security.py")
 
 
+def extract_block(source: str, header: str) -> str:
+    """Return one complete HCL block, including any nested blocks."""
+    match = re.search(header + r"\s*\{", source)
+    if not match:
+        raise AssertionError(f"missing HCL block matching {header!r}")
+    depth = 0
+    for index in range(match.end() - 1, len(source)):
+        if source[index] == "{":
+            depth += 1
+        elif source[index] == "}":
+            depth -= 1
+            if depth == 0:
+                return source[match.start():index + 1]
+    raise AssertionError(f"unterminated HCL block matching {header!r}")
+
+
+def normalize_hcl(block: str) -> str:
+    return re.sub(r"\s+", " ", block).strip()
+
+
 class LeakCheckTests(unittest.TestCase):
     def run_state_file(self, fixture: str) -> subprocess.CompletedProcess[str]:
         python_bin = "python3" if WSL_BASH else bash_path(Path(sys.executable))
@@ -221,52 +241,91 @@ class SecureExampleContractTests(unittest.TestCase):
                 self.assertRegex(traditional_lock, rf'version\s+= "{re.escape(cloud_version)}"')
                 self.assertRegex(traditional_lock, r'version\s+= "3\.7\.2"')
 
-    def test_azure_secure_example_denies_unlisted_networks(self) -> None:
+    def test_azure_secure_example_uses_deny_default_operator_acl(self) -> None:
         source = (ROOT / "03-azure-write-only" / "main.tf").read_text(encoding="utf-8")
         self.assertRegex(
             source,
             r'(?s)network_acls\s*\{.*?default_action\s*=\s*"Deny".*?\}',
         )
         self.assertIn("ip_rules       = [var.operator_ip_cidr]", source)
-        self.assertIn('endswith(var.operator_ip_cidr, "/32")', source)
+        self.assertIn(
+            'regexall("^[0-9]{1,3}\\\\.[0-9]{1,3}\\\\.[0-9]{1,3}\\\\.[0-9]{1,3}/32$"',
+            source,
+        )
+        self.assertNotIn("virtual_network_subnet_ids", extract_block(source, r"network_acls"))
+
+    def test_operator_cidr_rejects_non_public_ipv4_ranges(self) -> None:
+        for example in ("02-azure-traditional", "03-azure-write-only"):
+            source = (ROOT / example / "main.tf").read_text(encoding="utf-8")
+            variable = extract_block(source, r'variable\s+"operator_ip_cidr"')
+            with self.subTest(example=example):
+                self.assertIn("globally routable public IPv4", variable)
+                self.assertIn("try(alltrue", variable)
+                self.assertIn("cidrhost(var.operator_ip_cidr, 0)", variable)
+                # These clauses cover private, shared, loopback, link-local,
+                # documentation, benchmarking, multicast, and reserved space.
+                for required_fragment in (
+                    "< 224",
+                    "> 0",
+                    "[10, 127]",
+                    "== 100",
+                    ">= 64",
+                    "<= 127",
+                    "== 169",
+                    "== 254",
+                    "== 172",
+                    ">= 16",
+                    "<= 31",
+                    "== 192",
+                    "[0, 2]",
+                    "== 168",
+                    "== 88",
+                    "== 99",
+                    "== 198",
+                    "[18, 19]",
+                    "== 51",
+                    "== 100",
+                    "== 203",
+                    "== 113",
+                ):
+                    self.assertIn(required_fragment, variable)
 
     def test_azure_examples_are_network_policy_equivalent(self) -> None:
-        """Both Azure examples must isolate exactly one variable.
+        """Both Azure examples must use the same complete firewall policy.
 
-        The lab exists to compare traditional `value` against write-only
-        `value_wo`. If only the secure example restricts its data plane, the
-        comparison is confounded and the intentionally leaky vault, the one that
-        most needs a restricted network, is the more exposed of the two.
+        The lab compares traditional `value` against write-only `value_wo`.
+        Different network exposure would confound that security comparison.
         """
         azure_examples = ("02-azure-traditional", "03-azure-write-only")
         policies = {}
+        validations = {}
         for example in azure_examples:
             source = (ROOT / example / "main.tf").read_text(encoding="utf-8")
-            acl = re.search(r"(?s)network_acls\s*\{(.*?)\}", source)
-            self.assertIsNotNone(acl, f"{example}: Key Vault has no network_acls block")
-            body = acl.group(1)
-            policies[example] = {
-                "default_action": re.search(r'default_action\s*=\s*"(\w+)"', body).group(1),
-                "bypass": re.search(r'bypass\s*=\s*"(\w+)"', body).group(1),
-                "ip_rules": "ip_rules       = [var.operator_ip_cidr]" in body,
-                "validated_cidr": 'endswith(var.operator_ip_cidr, "/32")' in source,
-            }
+            policies[example] = normalize_hcl(extract_block(source, r"network_acls"))
+            validations[example] = normalize_hcl(
+                extract_block(source, r'variable\s+"operator_ip_cidr"')
+            )
 
         for example, policy in policies.items():
             with self.subTest(example=example):
-                self.assertEqual(policy["default_action"], "Deny")
-                self.assertEqual(policy["bypass"], "AzureServices")
-                self.assertTrue(policy["ip_rules"], f"{example}: ACL is not bound to the operator /32")
-                self.assertTrue(policy["validated_cidr"], f"{example}: operator_ip_cidr is not /32-validated")
+                self.assertIn('default_action = "Deny"', policy)
+                self.assertIn('bypass = "AzureServices"', policy)
+                self.assertIn("ip_rules = [var.operator_ip_cidr]", policy)
+                self.assertNotIn("virtual_network_subnet_ids", policy)
 
         self.assertEqual(
             policies[azure_examples[0]],
             policies[azure_examples[1]],
-            "the two Azure examples must differ only in secret handling, not network posture",
+            "the two Azure examples must have identical complete network_acls blocks",
+        )
+        self.assertEqual(
+            validations[azure_examples[0]],
+            validations[azure_examples[1]],
+            "the two Azure examples must enforce identical operator CIDR validation",
         )
 
-    def test_secret_handling_remains_the_one_intended_difference(self) -> None:
-        """Guard against 'fixing' the leaky example by making it non-leaky."""
+    def test_each_azure_example_preserves_its_secret_handling_contract(self) -> None:
+        """Guard each teaching fixture's intended state-persistence behavior."""
         traditional = (ROOT / "02-azure-traditional" / "main.tf").read_text(encoding="utf-8")
         secure = (ROOT / "03-azure-write-only" / "main.tf").read_text(encoding="utf-8")
 
