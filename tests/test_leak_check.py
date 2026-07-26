@@ -230,6 +230,53 @@ class SecureExampleContractTests(unittest.TestCase):
         self.assertIn("ip_rules       = [var.operator_ip_cidr]", source)
         self.assertIn('endswith(var.operator_ip_cidr, "/32")', source)
 
+    def test_azure_examples_are_network_policy_equivalent(self) -> None:
+        """Both Azure examples must isolate exactly one variable.
+
+        The lab exists to compare traditional `value` against write-only
+        `value_wo`. If only the secure example restricts its data plane, the
+        comparison is confounded and the intentionally leaky vault, the one that
+        most needs a restricted network, is the more exposed of the two.
+        """
+        azure_examples = ("02-azure-traditional", "03-azure-write-only")
+        policies = {}
+        for example in azure_examples:
+            source = (ROOT / example / "main.tf").read_text(encoding="utf-8")
+            acl = re.search(r"(?s)network_acls\s*\{(.*?)\}", source)
+            self.assertIsNotNone(acl, f"{example}: Key Vault has no network_acls block")
+            body = acl.group(1)
+            policies[example] = {
+                "default_action": re.search(r'default_action\s*=\s*"(\w+)"', body).group(1),
+                "bypass": re.search(r'bypass\s*=\s*"(\w+)"', body).group(1),
+                "ip_rules": "ip_rules       = [var.operator_ip_cidr]" in body,
+                "validated_cidr": 'endswith(var.operator_ip_cidr, "/32")' in source,
+            }
+
+        for example, policy in policies.items():
+            with self.subTest(example=example):
+                self.assertEqual(policy["default_action"], "Deny")
+                self.assertEqual(policy["bypass"], "AzureServices")
+                self.assertTrue(policy["ip_rules"], f"{example}: ACL is not bound to the operator /32")
+                self.assertTrue(policy["validated_cidr"], f"{example}: operator_ip_cidr is not /32-validated")
+
+        self.assertEqual(
+            policies[azure_examples[0]],
+            policies[azure_examples[1]],
+            "the two Azure examples must differ only in secret handling, not network posture",
+        )
+
+    def test_secret_handling_remains_the_one_intended_difference(self) -> None:
+        """Guard against 'fixing' the leaky example by making it non-leaky."""
+        traditional = (ROOT / "02-azure-traditional" / "main.tf").read_text(encoding="utf-8")
+        secure = (ROOT / "03-azure-write-only" / "main.tf").read_text(encoding="utf-8")
+
+        self.assertRegex(traditional, r'(?m)^\s*value\s*=\s*random_password\.')
+        self.assertIn('resource "random_password"', traditional)
+
+        self.assertIn("value_wo", secure)
+        self.assertIn('ephemeral "random_password"', secure)
+        self.assertNotRegex(secure, r'(?m)^\s*resource\s+"random_password"')
+
 
 if __name__ == "__main__":
     unittest.main()

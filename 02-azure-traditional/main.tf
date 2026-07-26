@@ -23,6 +23,20 @@ provider "azurerm" {
 # Get current client config for Key Vault access policy
 data "azurerm_client_config" "current" {}
 
+# Identical to 03-azure-write-only on purpose. The only variable this lab is
+# meant to isolate is traditional `value` versus write-only `value_wo`, so the
+# network posture of both Azure examples must match. The intentionally leaky
+# example is the one that most needs a restricted data plane.
+variable "operator_ip_cidr" {
+  description = "Exact public IPv4 /32 CIDR allowed to reach the demo Key Vault data plane"
+  type        = string
+
+  validation {
+    condition     = can(cidrnetmask(var.operator_ip_cidr)) && endswith(var.operator_ip_cidr, "/32")
+    error_message = "operator_ip_cidr must be one exact public IPv4 address expressed as a /32 CIDR."
+  }
+}
+
 # Random suffix for unique naming
 resource "random_id" "suffix" {
   byte_length = 4
@@ -50,6 +64,12 @@ resource "azurerm_key_vault" "demo" {
   # For demo purposes - adjust for production
   purge_protection_enabled   = false
   soft_delete_retention_days = 7
+
+  network_acls {
+    bypass         = "AzureServices"
+    default_action = "Deny"
+    ip_rules       = [var.operator_ip_cidr]
+  }
 
   access_policy {
     tenant_id = data.azurerm_client_config.current.tenant_id

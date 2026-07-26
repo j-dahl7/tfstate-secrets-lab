@@ -54,16 +54,28 @@ terraform -chdir=01-good-write-only plan
 terraform -chdir=01-good-write-only apply
 ```
 
-The Azure write-only example keeps the Key Vault firewall deny-by-default and
-requires the exact public IPv4 address of the trusted operator. Supply one
-`/32` only; broad network ranges are rejected by the configuration:
+**Both** Azure examples keep the Key Vault firewall deny-by-default and require
+the exact public IPv4 address of the trusted operator. Supply one `/32` only;
+broad network ranges are rejected by the configuration. The network posture is
+deliberately identical across the two, so the only variable the comparison
+isolates is traditional `value` versus write-only `value_wo`:
 
 ```bash
 export TF_VAR_operator_ip_cidr="203.0.113.10/32" # replace with your exact public IPv4
+
 terraform -chdir=03-azure-write-only init -lockfile=readonly
 terraform -chdir=03-azure-write-only plan
 terraform -chdir=03-azure-write-only apply
+
+# Same firewall, same variable, traditional secret handling
+terraform -chdir=02-azure-traditional init -lockfile=readonly
+terraform -chdir=02-azure-traditional plan
+terraform -chdir=02-azure-traditional apply
 ```
+
+The intentionally leaky example is firewalled too, on purpose. It is the vault
+whose secret is recoverable from state, so it is the one that least deserves an
+open data plane.
 
 For the intentionally traditional example, use the same lifecycle but do not
 print or query state attributes. A metadata-only view is enough to show which
