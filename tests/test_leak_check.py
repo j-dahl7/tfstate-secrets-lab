@@ -221,6 +221,15 @@ class SecureExampleContractTests(unittest.TestCase):
                 self.assertRegex(traditional_lock, rf'version\s+= "{re.escape(cloud_version)}"')
                 self.assertRegex(traditional_lock, r'version\s+= "3\.7\.2"')
 
+    def test_azure_secure_example_denies_unlisted_networks(self) -> None:
+        source = (ROOT / "03-azure-write-only" / "main.tf").read_text(encoding="utf-8")
+        self.assertRegex(
+            source,
+            r'(?s)network_acls\s*\{.*?default_action\s*=\s*"Deny".*?\}',
+        )
+        self.assertIn("ip_rules       = [var.operator_ip_cidr]", source)
+        self.assertIn('endswith(var.operator_ip_cidr, "/32")', source)
+
 
 if __name__ == "__main__":
     unittest.main()
