@@ -1,130 +1,100 @@
-#!/bin/bash
+#!/usr/bin/env bash
+# Pull and inspect Terraform state without ever printing attribute values.
 #
-# leak-check.sh - Scan Terraform state for potential secret leaks
-#
-# Usage: ./leak-check.sh [terraform_dir]
-#
-# Returns:
-#   0 - No secrets detected
-#   1 - Potential secrets found in state
-#   2 - Error (no state, missing tools, etc.)
-#
+# Exit codes:
+#   0 - no likely secret values found
+#   1 - likely secret values found
+#   2 - usage, tool, state-pull, empty-state, or parse failure
 
 set -euo pipefail
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
+usage() {
+  echo "Usage: $0 [--state-file path] [terraform-directory]" >&2
+}
 
-# Patterns that suggest secrets in state (case-insensitive)
-SECRET_PATTERNS='password|secret|token|api_key|private_key|credential|auth|cert'
+script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+state_file=""
+terraform_dir=""
 
-# Change to terraform directory if provided
-if [ -n "${1:-}" ]; then
-    cd "$1"
-fi
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --state-file)
+      if [[ $# -lt 2 || -n "$state_file" ]]; then
+        usage
+        exit 2
+      fi
+      state_file="$2"
+      shift 2
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    --*)
+      echo "ERROR: unknown option" >&2
+      usage
+      exit 2
+      ;;
+    *)
+      if [[ -n "$terraform_dir" ]]; then
+        usage
+        exit 2
+      fi
+      terraform_dir="$1"
+      shift
+      ;;
+  esac
+done
 
-echo "========================================"
-echo "  Terraform State Secret Scanner"
-echo "========================================"
-echo ""
-echo "Directory: $(pwd)"
-echo ""
-
-# Check for required tools
-if ! command -v jq &> /dev/null; then
-    echo -e "${RED}ERROR: jq is required but not installed${NC}"
+python_bin="${PYTHON_BIN:-python3}"
+if ! "$python_bin" --version >/dev/null 2>&1; then
+  if [[ -z "${PYTHON_BIN:-}" ]] && command -v python >/dev/null 2>&1 && python --version >/dev/null 2>&1; then
+    python_bin=python
+  else
+    echo "ERROR: a working Python 3 interpreter is required" >&2
     exit 2
+  fi
 fi
 
-# Find terraform - check common locations
-TERRAFORM=""
-if command -v terraform &> /dev/null; then
-    TERRAFORM="terraform"
-elif [ -x "$HOME/bin/terraform" ]; then
-    TERRAFORM="$HOME/bin/terraform"
-else
-    echo -e "${RED}ERROR: terraform is required but not installed${NC}"
+temporary_directory=""
+cleanup() {
+  if [[ -n "$temporary_directory" && -d "$temporary_directory" ]]; then
+    rm -rf -- "$temporary_directory"
+  fi
+}
+trap cleanup EXIT
+
+if [[ -z "$state_file" ]]; then
+  if ! command -v terraform >/dev/null 2>&1; then
+    echo "ERROR: terraform is required when --state-file is not used" >&2
     exit 2
+  fi
+
+  terraform_dir=${terraform_dir:-.}
+  if [[ ! -d "$terraform_dir" ]]; then
+    echo "ERROR: Terraform directory does not exist" >&2
+    exit 2
+  fi
+
+  temporary_directory=$(mktemp -d)
+  state_file="$temporary_directory/state.json"
+
+  # Terraform diagnostics are intentionally withheld: a backend or provider
+  # can include sensitive material in its error output.
+  if ! terraform -chdir="$terraform_dir" state pull \
+    >"$state_file" 2>"$temporary_directory/terraform.err"; then
+    echo "ERROR: Terraform state pull failed" >&2
+    exit 2
+  fi
+elif [[ -n "$terraform_dir" ]]; then
+  echo "ERROR: choose --state-file or a Terraform directory, not both" >&2
+  exit 2
 fi
 
-# Check if state exists
-echo "Checking for Terraform state..."
-if ! $TERRAFORM state pull > /tmp/tf-state-check.json 2>&1; then
-    echo -e "${YELLOW}WARNING: No state found or unable to pull state${NC}"
-    echo "This might be expected if you haven't run 'terraform apply' yet."
-    rm -f /tmp/tf-state-check.json
-    exit 0
+if [[ ! -f "$state_file" || ! -s "$state_file" ]] || \
+   ! grep -q '[^[:space:]]' "$state_file"; then
+  echo "ERROR: Terraform state is empty" >&2
+  exit 2
 fi
 
-STATE_SIZE=$(wc -c < /tmp/tf-state-check.json)
-if [ "$STATE_SIZE" -lt 10 ]; then
-    echo -e "${YELLOW}WARNING: State appears empty${NC}"
-    rm -f /tmp/tf-state-check.json
-    exit 0
-fi
-
-echo "State file retrieved (${STATE_SIZE} bytes)"
-echo ""
-
-# Search for suspicious attribute names and their values
-echo "Scanning for sensitive patterns: ${SECRET_PATTERNS}"
-echo ""
-
-# Also check random_password.result which often contains leaked passwords
-MATCHES=$(cat /tmp/tf-state-check.json | jq -r '
-  .resources[]? |
-  select(.type == "random_password" or .type == "random_string") |
-  .instances[]? |
-  .attributes |
-  select(.result != null and .result != "") |
-  "  [random_password] result: \(.result | .[0:40])\(if (.result | length) > 40 then \"...\" else \"\" end)"
-' 2>/dev/null || true)
-
-# Also scan for named patterns
-MATCHES2=$(cat /tmp/tf-state-check.json | jq -r '
-  .resources[]? |
-  .instances[]? |
-  .attributes |
-  to_entries[] |
-  select(.key | test("'"$SECRET_PATTERNS"'"; "i")) |
-  select(.value != null and .value != "" and (.value | type) == "string") |
-  "  \(.key): \(.value | .[0:40])\(if (.value | length) > 40 then \"...\" else \"\" end)"
-' 2>/dev/null || true)
-
-MATCHES="${MATCHES}${MATCHES2}"
-
-# Cleanup
-rm -f /tmp/tf-state-check.json
-
-# Report results
-if [ -n "$MATCHES" ]; then
-    echo -e "${RED}========================================${NC}"
-    echo -e "${RED}  FAIL: Potential secrets in state!${NC}"
-    echo -e "${RED}========================================${NC}"
-    echo ""
-    echo "Found the following suspicious values:"
-    echo ""
-    echo "$MATCHES"
-    echo ""
-    echo -e "${YELLOW}Recommendations:${NC}"
-    echo "  1. Use write-only arguments (_wo) where available"
-    echo "  2. Use ephemeral resources for secret generation"
-    echo "  3. Store references (ARNs) instead of values"
-    echo "  4. Ensure state backend is encrypted + access-controlled"
-    echo ""
-    exit 1
-else
-    echo -e "${GREEN}========================================${NC}"
-    echo -e "${GREEN}  PASS: No obvious secrets in state${NC}"
-    echo -e "${GREEN}========================================${NC}"
-    echo ""
-    echo "No values matching secret patterns were found."
-    echo ""
-    echo -e "${YELLOW}Note: This scan checks for common patterns but may not catch everything.${NC}"
-    echo "Always treat state files as sensitive data."
-    echo ""
-    exit 0
-fi
+"$python_bin" "$script_dir/scan_state.py" "$state_file"

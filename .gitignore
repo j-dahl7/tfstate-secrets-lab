@@ -3,9 +3,11 @@
 *.tfstate.*
 *.tfstate.backup
 .terraform/
-.terraform.lock.hcl
 *.tfvars
 *.tfvars.json
+*.tfplan
+tfplan
+.terraform.tfstate.lock.info
 crash.log
 crash.*.log
 override.tf
@@ -38,3 +40,7 @@ screenshots/*.png
 # Temp files
 *.tmp
 *.log
+
+# Python test cache
+__pycache__/
+*.pyc

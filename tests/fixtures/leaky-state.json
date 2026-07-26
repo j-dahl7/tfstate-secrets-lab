@@ -1,0 +1,36 @@
+{
+  "version": 4,
+  "serial": 1,
+  "resources": [
+    {
+      "type": "random_password",
+      "name": "db_password",
+      "instances": [
+        {
+          "attributes": {
+            "length": 24,
+            "result": "NLS-DO-NOT-PRINT-9v#Synthetic"
+          }
+        }
+      ]
+    },
+    {
+      "type": "aws_secretsmanager_secret_version",
+      "name": "db_creds",
+      "instances": [
+        {
+          "attributes": {
+            "secret_string": "NLS-DO-NOT-PRINT-9v#Synthetic"
+          }
+        }
+      ]
+    }
+  ],
+  "outputs": {
+    "password_preview": {
+      "sensitive": true,
+      "type": "string",
+      "value": "NLS-DO-NOT-PRINT-9v#Synthetic"
+    }
+  }
+}

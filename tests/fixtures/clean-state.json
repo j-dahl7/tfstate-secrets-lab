@@ -1,0 +1,28 @@
+{
+  "version": 4,
+  "serial": 1,
+  "resources": [
+    {
+      "type": "aws_secretsmanager_secret_version",
+      "name": "db_creds",
+      "instances": [
+        {
+          "attributes": {
+            "secret_id": "urn:nls:synthetic:aws-secret:demo",
+            "secret_string": null,
+            "secret_string_wo": null,
+            "secret_string_wo_version": 1,
+            "version_id": "synthetic-version"
+          }
+        }
+      ]
+    }
+  ],
+  "outputs": {
+    "secret_arn": {
+      "sensitive": false,
+      "type": "string",
+      "value": "urn:nls:synthetic:aws-secret:demo"
+    }
+  }
+}
