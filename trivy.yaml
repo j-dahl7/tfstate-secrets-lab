@@ -1,13 +1,14 @@
 # Trivy configuration for tfstate-secrets-lab
 # https://aquasecurity.github.io/trivy/latest/docs/references/configuration/config-file/
 
-# Enable raw Terraform scanning for write-only argument detection
+# Enable raw Terraform input for custom Rego checks. The repository's production
+# write-only checks remain in scripts/check_terraform_security.py; the Rego
+# policy under tests/ is only a CLI/configuration wiring fixture.
 misconfiguration:
   scanners:
     - terraform
-  terraform:
-    raw-config-scanners:
-      - terraform
+  raw-config-scanners:
+    - terraform
 
 # Severity levels to report
 severity:

@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -16,8 +17,9 @@ ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "leak-check.sh"
 FIXTURES = ROOT / "tests" / "fixtures"
 SECRET_VALUE = "NLS-DO-NOT-PRINT-9v#Synthetic"
+BASH = os.environ.get("BASH_BIN") or shutil.which("bash") or "bash"
 WSL_BASH = os.name == "nt" and subprocess.run(
-    ["bash", "-lc", "test -d /mnt/c"], check=False
+    [BASH, "-lc", "test -d /mnt/c"], check=False
 ).returncode == 0
 
 
@@ -73,7 +75,7 @@ class LeakCheckTests(unittest.TestCase):
             ]
         )
         return subprocess.run(
-            ["bash", "-lc", command],
+            [BASH, "-lc", command],
             text=True,
             capture_output=True,
             check=False,
@@ -120,7 +122,7 @@ class LeakCheckTests(unittest.TestCase):
                 ]
             )
             return subprocess.run(
-                ["bash", "-lc", command],
+                [BASH, "-lc", command],
                 text=True,
                 capture_output=True,
                 check=False,
