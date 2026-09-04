@@ -116,3 +116,6 @@ jobs:
           severity: HIGH,CRITICAL
           exit-code: '1'
           version: v0.70.0
+
+      - name: Verify actual Trivy raw-config wiring
+        run: python3 scripts/check_trivy_config.py

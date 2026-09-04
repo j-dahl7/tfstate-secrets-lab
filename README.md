@@ -141,7 +141,15 @@ python3 -m unittest discover -s tests -v
 python3 scripts/check_terraform_security.py
 bash scripts/leak-check.sh --state-file tests/fixtures/clean-state.json
 terraform fmt -check -recursive
+python3 scripts/check_trivy_config.py --trivy /path/to/trivy
 ```
+
+The last command requires the same Trivy **0.70.0** used in CI. It executes
+the real CLI against synthetic bad/good Terraform fixtures and a deliberately
+misnested config control, proving `misconfiguration.raw-config-scanners` is
+effective. It does not initialize providers, apply resources, or read state.
+The custom Rego rule is a test fixture, not a comprehensive secret policy;
+`scripts/check_terraform_security.py` remains the secure examples' source gate.
 
 CI runs the same tests, explicitly requires the leaky fixture to exit `1`,
 initializes each directory with `-lockfile=readonly`, validates all four
