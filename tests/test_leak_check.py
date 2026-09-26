@@ -197,6 +197,23 @@ class LeakCheckTests(unittest.TestCase):
         )
         self.assertEqual(len(findings), 1)
 
+    def test_key_vault_authorization_metadata_is_not_a_secret(self) -> None:
+        state = {"resources": [{"type": "azurerm_key_vault", "instances": [{"attributes": {
+            "enable_rbac_authorization": True,
+            "access_policy": [{"secret_permissions": ["Get", "List", "Set"], "certificate_permissions": ["Get"]}],
+        }}]}]}
+        self.assertEqual(scanner.scan_state(state), [])
+        state["resources"][0]["instances"][0]["attributes"]["access_policy"][0]["secret_permissions"] = [SECRET_VALUE]
+        self.assertTrue(scanner.scan_state(state), "invalid permission values must remain visible to the heuristic")
+        state["resources"][0]["type"] = "unrelated_resource"
+        self.assertTrue(scanner.scan_state(state), "a suffix alone must not bypass scanning")
+
+    def test_authorization_metadata_exception_never_excludes_a_real_secret(self) -> None:
+        state = {"resources": [{"type": "azurerm_key_vault_secret", "instances": [{"attributes": {
+            "value": SECRET_VALUE, "secret_permissions": ["Get"],
+        }}]}]}
+        self.assertTrue(scanner.scan_state(state))
+
 
 class SecureExampleContractTests(unittest.TestCase):
     def test_checked_in_secure_examples_pass(self) -> None:
@@ -227,7 +244,7 @@ class SecureExampleContractTests(unittest.TestCase):
         self.assertIn("bash scripts/leak-check.sh --state-file tests/fixtures/clean-state.json", workflow)
         self.assertIn("expected_status=1", workflow)
         self.assertIn("exit-code: '1'", workflow)
-        self.assertIn("version: v0.70.0", workflow)
+        self.assertIn("version: v0.74.0", workflow)
         self.assertIn("-lockfile=readonly", workflow)
 
     def test_provider_locks_are_present_exact_and_pairwise_identical(self) -> None:

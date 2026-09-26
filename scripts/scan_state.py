@@ -23,6 +23,28 @@ SENSITIVE_RESOURCE_ATTRIBUTES = {
     "azurerm_key_vault_secret": {"value"},
 }
 
+AZURE_PERMISSION_VALUES = {
+    "Backup", "Create", "Decrypt", "Delete", "Encrypt", "Get", "GetIssuers",
+    "GetRotationPolicy", "Import", "List", "ListIssuers", "ManageContacts",
+    "ManageIssuers", "Purge", "Recover", "Release", "Restore", "Rotate", "Set",
+    "SetIssuers", "SetRotationPolicy", "Sign", "UnwrapKey", "Update", "Verify", "WrapKey",
+}
+
+
+def authorization_metadata(resource_type: str, path: tuple[str, ...], value: Any) -> bool:
+    """Recognize actual Key Vault authorization settings, not arbitrary name suffixes."""
+    if resource_type not in {"azurerm_key_vault", "azurerm_key_vault_access_policy"}:
+        return False
+    if len(path) == 1 and path[0] in {"enable_rbac_authorization", "rbac_authorization_enabled"}:
+        return isinstance(value, bool)
+    permission_field = path[-1] in {"key_permissions", "secret_permissions", "certificate_permissions"}
+    expected_path = (resource_type == "azurerm_key_vault_access_policy" and len(path) == 1) or (
+        resource_type == "azurerm_key_vault" and len(path) == 3 and path[0] == "access_policy" and path[1].isdigit()
+    )
+    return permission_field and expected_path and isinstance(value, list) and all(
+        isinstance(item, str) and item in AZURE_PERMISSION_VALUES for item in value
+    )
+
 
 def populated(value: Any) -> bool:
     if value is None or value is False:
@@ -78,6 +100,7 @@ def scan_state(state: dict[str, Any]) -> list[str]:
                     bool(SECRET_KEY.search(key))
                     and not REFERENCE_KEY.search(key)
                     and not WRITE_ONLY_METADATA_KEY.search(key)
+                    and not authorization_metadata(resource_type, path, value)
                 )
                 if exact_sensitive or suspicious_name:
                     reason = (

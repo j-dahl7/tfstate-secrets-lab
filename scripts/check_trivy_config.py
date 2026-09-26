@@ -34,8 +34,8 @@ def main():
     parser.add_argument('--trivy', default='trivy')
     args = parser.parse_args()
     version = run(args.trivy, '--version', '--format', 'json')['Version']
-    if version != '0.70.0':
-        raise RuntimeError(f'Expected pinned Trivy 0.70.0, got {version}')
+    if version != '0.74.0':
+        raise RuntimeError(f'Expected pinned Trivy 0.74.0, got {version}')
     if len(findings(args.trivy, ROOT / 'trivy.yaml', 'bad')) != 1:
         raise RuntimeError('Repository config failed to activate the terraform-raw fixture check')
     if findings(args.trivy, ROOT / 'trivy.yaml', 'good'):
@@ -46,7 +46,7 @@ def main():
                           '  terraform:\n    raw-config-scanners: [terraform]\n', encoding='utf-8')
         if findings(args.trivy, broken, 'bad'):
             raise RuntimeError('Negative config control unexpectedly enabled raw scanning')
-    print('PASS: Trivy 0.70.0 config activates raw policy; good and broken-config controls do not match')
+    print('PASS: Trivy 0.74.0 config activates raw policy; good and broken-config controls do not match')
 
 
 if __name__ == '__main__':
