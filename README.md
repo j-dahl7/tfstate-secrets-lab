@@ -21,7 +21,11 @@ Terraform 1.11 write-only provider arguments.
 
 The secure examples are guarded against regression by
 `scripts/check_terraform_security.py`. The state scanner reports field
-locations only and never reports field values.
+resource/instance positions only and never reports attribute names or values.
+Known Key Vault permission lists and boolean authorization settings are not
+secret material; that exception is restricted to the relevant resource schema
+and valid setting types. Actual secret values and unknown secret-like fields
+still produce findings.
 
 ## Prerequisites
 
@@ -29,7 +33,7 @@ locations only and never reports field values.
 - Random provider 3.7.0 or newer for ephemeral `random_password`
 - AWS provider 5.88.0 or newer for `secret_string_wo`
 - AzureRM provider 4.23.0 or newer for `value_wo`
-- Python 3.8 or newer
+- Python 3.12 or newer (use a supported interpreter)
 - Bash
 - AWS CLI or Azure CLI only if you apply the corresponding cloud example
 - A disposable subscription/account and a protected, encrypted state backend
@@ -144,7 +148,7 @@ terraform fmt -check -recursive
 python3 scripts/check_trivy_config.py --trivy /path/to/trivy
 ```
 
-The last command requires the same Trivy **0.70.0** used in CI. It executes
+The last command requires the same Trivy **0.74.0** used in CI. It executes
 the real CLI against synthetic bad/good Terraform fixtures and a deliberately
 misnested config control, proving `misconfiguration.raw-config-scanners` is
 effective. It does not initialize providers, apply resources, or read state.
@@ -154,7 +158,18 @@ The custom Rego rule is a test fixture, not a comprehensive secret policy;
 CI runs the same tests, explicitly requires the leaky fixture to exit `1`,
 initializes each directory with `-lockfile=readonly`, validates all four
 Terraform directories, and runs Trivy with `exit-code: 1` against both secure
-examples. Intentional insecure examples remain teaching fixtures and are not
+examples at **HIGH,CRITICAL** severity. For equivalent local scans, use:
+
+```bash
+trivy config 01-good-write-only --config trivy.yaml --severity HIGH,CRITICAL --exit-code 1
+trivy config 03-azure-write-only --config trivy.yaml --severity HIGH,CRITICAL --exit-code 1
+```
+
+The repository configuration also displays MEDIUM findings when no severity
+override is supplied. In particular, disposable Azure cleanup leaves purge
+protection disabled; that MEDIUM finding is not a secret-state leak. Do not
+enable irreversible retention merely to make a disposable example pass a
+different scan threshold. Intentional insecure examples remain teaching fixtures and are not
 used as the passing security baseline.
 
 ## Cleanup
